@@ -4,7 +4,7 @@ import './App.css'
 const API_URL = 'http://localhost:5000'
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState('login')
+  const [currentPage, setCurrentPage] = useState('home')
   const [user, setUser] = useState(null)
   const [loginEmail, setLoginEmail] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
@@ -12,13 +12,19 @@ export default function App() {
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskAssignedTo, setNewTaskAssignedTo] = useState('')
   const [newTaskPriority, setNewTaskPriority] = useState('medium')
+  const [newTaskDueDate, setNewTaskDueDate] = useState('')
+  const [newTaskTags, setNewTaskTags] = useState('')
+  const minDueDate = new Date().toISOString().split('T')[0]
   const [draggedTask, setDraggedTask] = useState(null)
   const [notifications, setNotifications] = useState([])
   const [showNotifications, setShowNotifications] = useState(false)
   const [filterPriority, setFilterPriority] = useState('all')
+  const [filterTag, setFilterTag] = useState('all')
   const [filterUser, setFilterUser] = useState('all')
   const [trendFilter, setTrendFilter] = useState('all')
   const [loginError, setLoginError] = useState('')
+  const [editingTaskId, setEditingTaskId] = useState(null)
+  const [editingTaskTitle, setEditingTaskTitle] = useState('')
 
   const allUsers = ['student@vitapex.ac.in', 'boss@gmail.com']
 
@@ -43,6 +49,11 @@ export default function App() {
     }
   }, [currentPage, user])
 
+  const getTaskTitle = (task) => task?.details?.title || ''
+  const getTaskCreatedBy = (task) => task?.details?.createdBy || ''
+  const getTaskAssignedTo = (task) => task?.details?.assignedTo || ''
+  const parseTags = (value) => (value || '').split(',').map(tag => tag.trim()).filter(Boolean)
+
   async function loadTasks() {
     try {
       const res = await fetch(`${API_URL}/tasks`)
@@ -50,7 +61,7 @@ export default function App() {
       setTasks(data || [])
       
       if (user?.role === 'employee') {
-        const assignedTasks = data.filter(t => t.assignedTo === user.email && t.status !== 'done')
+        const assignedTasks = data.filter(t => getTaskAssignedTo(t) === user.email && t.status !== 'done')
         setNotifications(assignedTasks)
       }
     } catch (err) {
@@ -83,7 +94,7 @@ export default function App() {
       return
     }
 
-    // Send login request to backend
+    // Send login request to backend API CALL
     try {
       const res = await fetch(`${API_URL}/login`, {
         method: 'POST',
@@ -131,13 +142,26 @@ export default function App() {
       return
     }
 
+    if (newTaskDueDate) {
+      const selectedDate = new Date(newTaskDueDate)
+      selectedDate.setHours(0, 0, 0, 0)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      if (selectedDate < today) {
+        alert('Due date cannot be earlier than today.')
+        return
+      }
+    }
+
     try {
       const taskData = {
         title: newTaskTitle,
         status: 'todo',
         createdBy: user.email,
         assignedTo: user?.role === 'admin' ? newTaskAssignedTo : user.email,
-        priority: newTaskPriority
+        priority: newTaskPriority,
+        dueDate: newTaskDueDate || null,
+        tags: parseTags(newTaskTags),
       }
 
       const res = await fetch(`${API_URL}/tasks`, {
@@ -152,6 +176,8 @@ export default function App() {
         setNewTaskTitle('')
         setNewTaskAssignedTo('')
         setNewTaskPriority('medium')
+        setNewTaskDueDate('')
+        setNewTaskTags('')
         loadTasks()
       } else {
         console.error('Backend error:', responseData)
@@ -192,6 +218,56 @@ export default function App() {
     }
   }
 
+  function startEditingTask(task) {
+    setEditingTaskId(task._id)
+    setEditingTaskTitle(getTaskTitle(task))
+  }
+
+  async function saveEditedTask(taskId) {
+    if (!editingTaskTitle.trim()) {
+      alert('Task title cannot be empty')
+      return
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: editingTaskTitle })
+      })
+
+      if (res.ok) {
+        setEditingTaskId(null)
+        setEditingTaskTitle('')
+        loadTasks()
+      } else {
+        alert('Error updating task')
+      }
+    } catch (err) {
+      console.error('Error updating task:', err)
+      alert('Error updating task: ' + err.message)
+    }
+  }
+
+  function cancelEditingTask() {
+    setEditingTaskId(null)
+    setEditingTaskTitle('')
+  }
+
+  async function deleteAllTasks() {
+    if (window.confirm('Are you sure you want to delete ALL tasks? This action cannot be undone.')) {
+      try {
+        const res = await fetch(`${API_URL}/tasks`, { method: 'DELETE' })
+        if (res.ok) {
+          loadTasks()
+        }
+      } catch (err) {
+        console.error('Error deleting all tasks:', err)
+        alert('Error deleting all tasks: ' + err.message)
+      }
+    }
+  }
+
   function handleDragStart(e, task) {
     setDraggedTask(task)
     e.dataTransfer.effectAllowed = 'move'
@@ -217,21 +293,42 @@ export default function App() {
   }
 
   const filteredTasksByStatus = {
-    todo: filterPriority === 'all' ? tasksByStatus.todo : tasksByStatus.todo.filter(t => t.priority === filterPriority),
-    inProgress: filterPriority === 'all' ? tasksByStatus.inProgress : tasksByStatus.inProgress.filter(t => t.priority === filterPriority),
-    done: filterPriority === 'all' ? tasksByStatus.done : tasksByStatus.done.filter(t => t.priority === filterPriority)
+    todo: tasksByStatus.todo.filter(t => (filterPriority === 'all' || t.priority === filterPriority) && (filterTag === 'all' || (t.tags || []).includes(filterTag))),
+    inProgress: tasksByStatus.inProgress.filter(t => (filterPriority === 'all' || t.priority === filterPriority) && (filterTag === 'all' || (t.tags || []).includes(filterTag))),
+    done: tasksByStatus.done.filter(t => (filterPriority === 'all' || t.priority === filterPriority) && (filterTag === 'all' || (t.tags || []).includes(filterTag)))
   }
 
   const getUniqueUsers = () => {
     const users = new Set()
     tasks.forEach(t => {
-      if (t.createdBy) users.add(t.createdBy)
-      if (t.assignedTo) users.add(t.assignedTo)
+      if (getTaskCreatedBy(t)) users.add(getTaskCreatedBy(t))
+      if (getTaskAssignedTo(t)) users.add(getTaskAssignedTo(t))
     })
     return Array.from(users).sort()
   }
 
-  const filteredTasksForAnalytics = filterUser === 'all' ? tasks : tasks.filter(t => t.createdBy === filterUser || t.assignedTo === filterUser)
+  const getUniqueTags = () => {
+    const tags = new Set()
+    tasks.forEach(t => {
+      (t.tags || []).forEach(tag => tags.add(tag))
+    })
+    return Array.from(tags).sort()
+  }
+
+  const filteredTasksForAnalytics = filterUser === 'all' ? tasks : tasks.filter(t => getTaskCreatedBy(t) === filterUser || getTaskAssignedTo(t) === filterUser)
+
+  const normalizeDate = (value) => {
+    const date = new Date(value)
+    date.setHours(0, 0, 0, 0)
+    return date.getTime()
+  }
+
+  const todayKey = normalizeDate(new Date())
+  const tomorrowKey = normalizeDate(new Date(Date.now() + 24 * 60 * 60 * 1000))
+
+  const tasksDueToday = filteredTasksForAnalytics.filter(task => task.dueDate && normalizeDate(task.dueDate) === todayKey)
+  const tasksDueTomorrow = filteredTasksForAnalytics.filter(task => task.dueDate && normalizeDate(task.dueDate) === tomorrowKey)
+  const highPriorityAlerts = filteredTasksForAnalytics.filter(task => task.priority === 'high' && task.status !== 'done')
 
   const getCompletionTrendData = () => {
     const last7Days = []
@@ -285,6 +382,71 @@ export default function App() {
     completed: filteredTasksForAnalytics.filter(t => t.status === 'done').length,
     inProgress: filteredTasksForAnalytics.filter(t => t.status === 'inProgress').length,
     pending: filteredTasksForAnalytics.filter(t => t.status === 'todo').length
+  }
+
+  if (currentPage === 'home') {
+    return (
+      <div className="full-container landing-page">
+        <div className="landing-hero">
+          <div className="hero-copy">
+            <div className="eyebrow">Task management, simplified</div>
+            <h1>Keep every task moving forward with clarity and calm.</h1>
+            <p className="hero-description">
+              Task Master brings your team together with a warm dashboard, intuitive workflow, and clear status tracking. Start with a landing experience that feels polished, familiar, and easy to use.
+            </p>
+            <div className="hero-actions">
+              <button className="primary-btn" onClick={() => setCurrentPage('login')}>Get Started</button>
+            </div>
+          </div>
+
+          <div className="hero-preview-card">
+            <div className="preview-header">
+              <span>Live task board</span>
+              <div className="preview-pill">Team visibility</div>
+            </div>
+            <div className="preview-body">
+              <div className="preview-row">
+                <div className="preview-column">
+                  <div className="preview-status-title">To Do</div>
+                  <div className="preview-task">Prepare project brief</div>
+                </div>
+                <div className="preview-column">
+                  <div className="preview-status-title">In Progress</div>
+                  <div className="preview-task">Review designs</div>
+                </div>
+                <div className="preview-column">
+                  <div className="preview-status-title">Done</div>
+                  <div className="preview-task done">Sprint planning</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <section className="landing-features">
+          <div className="feature-card">
+            <h3>Organize every task</h3>
+            <p>Track work by status, owner, and priority in a single calm workspace.</p>
+          </div>
+          <div className="feature-card">
+            <h3>Simple team handoffs</h3>
+            <p>Assign tasks, share updates, and move work forward without noise.</p>
+          </div>
+          <div className="feature-card">
+            <h3>Progress at a glance</h3>
+            <p>Visual summaries and clear metrics help teams stay aligned.</p>
+          </div>
+        </section>
+
+        <section className="landing-cta">
+          <div>
+            <h2>Ready for a cleaner task flow?</h2>
+            <p>Use the same interface style, color palette, and typography as the rest of the app for a seamless experience.</p>
+          </div>
+          <button className="primary-btn" onClick={() => setCurrentPage('login')}>Log in to Task Master</button>
+        </section>
+      </div>
+    )
   }
 
   if (currentPage === 'login') {
@@ -359,8 +521,8 @@ return (
                   <ul className="notification-list">
                     {notifications.map((task) => (
                       <li key={task._id} className="notification-item">
-                        <div className="notification-title">{task.title}</div>
-                        <small>From: {task.createdBy}</small>
+                                <div className="notification-title">{getTaskTitle(task)}</div>
+                        <small>From: {getTaskCreatedBy(task)}</small>
                       </li>
                     ))}
                   </ul>
@@ -455,6 +617,21 @@ return (
                   ))}
                 </select>
               )}
+              <input
+                type="text"
+                value={newTaskTags}
+                onChange={(e) => setNewTaskTags(e.target.value)}
+                placeholder="Tags (comma separated)"
+                className="task-title-input"
+              />
+              <input
+                type="date"
+                value={newTaskDueDate}
+                min={minDueDate}
+                onChange={(e) => setNewTaskDueDate(e.target.value)}
+                className="task-title-input"
+                placeholder="Due date"
+              />
               <button onClick={addTask} className="create-btn">Create</button>
             </div>
           </div>
@@ -473,6 +650,20 @@ return (
             <button className={`filter-btn ${filterPriority === 'low' ? 'active' : ''}`} onClick={() => setFilterPriority('low')}>
               Low Priority
             </button>
+            <select
+              value={filterTag}
+              onChange={(e) => setFilterTag(e.target.value)}
+              className="assign-select"
+              style={{ maxWidth: '180px', marginLeft: '8px' }}
+            >
+              <option value="all">All Tags</option>
+              {getUniqueTags().map(tag => (
+                <option key={tag} value={tag}>{tag}</option>
+              ))}
+            </select>
+            <button className="delete-all-btn" onClick={deleteAllTasks} title="Delete all tasks">
+              🗑️ Delete All
+            </button>
           </div>
 
           <div className="kanban-board">
@@ -487,17 +678,50 @@ return (
               </div>
               <div className="tasks-container">
                 {filteredTasksByStatus.todo.map(task => (
-                  <div key={task._id} className="task-card" draggable onDragStart={(e) => handleDragStart(e, task)}>
+                  <div key={task._id} className="task-card" draggable={editingTaskId !== task._id} onDragStart={(e) => handleDragStart(e, task)}>
                     <div className="task-header">
                       <span className={`priority-badge priority-${task.priority}`}>{task.priority}</span>
-                      <button className="delete-task-btn" onClick={() => deleteTask(task._id)}>×</button>
+                      <div className="task-actions">
+                        {editingTaskId === task._id ? (
+                          <>
+                            <button className="save-task-btn" onClick={() => saveEditedTask(task._id)} title="Save">✓</button>
+                            <button className="cancel-task-btn" onClick={cancelEditingTask} title="Cancel">✕</button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="edit-task-btn" onClick={() => startEditingTask(task)} title="Edit">✎</button>
+                            <button className="delete-task-btn" onClick={() => deleteTask(task._id)}>×</button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <h5>{task.title}</h5>
+                    {editingTaskId === task._id ? (
+                      <input
+                        type="text"
+                        value={editingTaskTitle}
+                        onChange={(e) => setEditingTaskTitle(e.target.value)}
+                        className="task-edit-input"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveEditedTask(task._id)
+                          if (e.key === 'Escape') cancelEditingTask()
+                        }}
+                      />
+                    ) : (
+                      <h5>{getTaskTitle(task)}</h5>
+                    )}
                     <div className="task-meta">
-                      <small>By: {task.createdBy}</small>
+                      <small>By: {getTaskCreatedBy(task)}</small>
                       <br />
-                      <small>For: {task.assignedTo}</small>
+                      <small>For: {getTaskAssignedTo(task)}</small>
                     </div>
+                    {(task.tags || []).length > 0 && (
+                      <div className="task-tags">
+                        {(task.tags || []).map(tag => (
+                          <span key={tag} className="tag-pill">{tag}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -514,17 +738,50 @@ return (
               </div>
               <div className="tasks-container">
                 {filteredTasksByStatus.inProgress.map(task => (
-                  <div key={task._id} className="task-card" draggable onDragStart={(e) => handleDragStart(e, task)}>
+                  <div key={task._id} className="task-card" draggable={editingTaskId !== task._id} onDragStart={(e) => handleDragStart(e, task)}>
                     <div className="task-header">
                       <span className={`priority-badge priority-${task.priority}`}>{task.priority}</span>
-                      <button className="delete-task-btn" onClick={() => deleteTask(task._id)}>×</button>
+                      <div className="task-actions">
+                        {editingTaskId === task._id ? (
+                          <>
+                            <button className="save-task-btn" onClick={() => saveEditedTask(task._id)} title="Save">✓</button>
+                            <button className="cancel-task-btn" onClick={cancelEditingTask} title="Cancel">✕</button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="edit-task-btn" onClick={() => startEditingTask(task)} title="Edit">✎</button>
+                            <button className="delete-task-btn" onClick={() => deleteTask(task._id)}>×</button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <h5>{task.title}</h5>
+                    {editingTaskId === task._id ? (
+                      <input
+                        type="text"
+                        value={editingTaskTitle}
+                        onChange={(e) => setEditingTaskTitle(e.target.value)}
+                        className="task-edit-input"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveEditedTask(task._id)
+                          if (e.key === 'Escape') cancelEditingTask()
+                        }}
+                      />
+                    ) : (
+                      <h5>{getTaskTitle(task)}</h5>
+                    )}
                     <div className="task-meta">
-                      <small>By: {task.createdBy}</small>
+                      <small>By: {getTaskCreatedBy(task)}</small>
                       <br />
-                      <small>For: {task.assignedTo}</small>
+                      <small>For: {getTaskAssignedTo(task)}</small>
                     </div>
+                    {(task.tags || []).length > 0 && (
+                      <div className="task-tags">
+                        {(task.tags || []).map(tag => (
+                          <span key={tag} className="tag-pill">{tag}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -541,17 +798,50 @@ return (
               </div>
               <div className="tasks-container">
                 {filteredTasksByStatus.done.map(task => (
-                  <div key={task._id} className="task-card completed" draggable onDragStart={(e) => handleDragStart(e, task)}>
+                  <div key={task._id} className="task-card completed" draggable={editingTaskId !== task._id} onDragStart={(e) => handleDragStart(e, task)}>
                     <div className="task-header">
                       <span className={`priority-badge priority-${task.priority}`}>{task.priority}</span>
-                      <button className="delete-task-btn" onClick={() => deleteTask(task._id)}>×</button>
+                      <div className="task-actions">
+                        {editingTaskId === task._id ? (
+                          <>
+                            <button className="save-task-btn" onClick={() => saveEditedTask(task._id)} title="Save">✓</button>
+                            <button className="cancel-task-btn" onClick={cancelEditingTask} title="Cancel">✕</button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="edit-task-btn" onClick={() => startEditingTask(task)} title="Edit">✎</button>
+                            <button className="delete-task-btn" onClick={() => deleteTask(task._id)}>×</button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <h5>{task.title}</h5>
+                    {editingTaskId === task._id ? (
+                      <input
+                        type="text"
+                        value={editingTaskTitle}
+                        onChange={(e) => setEditingTaskTitle(e.target.value)}
+                        className="task-edit-input"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveEditedTask(task._id)
+                          if (e.key === 'Escape') cancelEditingTask()
+                        }}
+                      />
+                    ) : (
+                      <h5>{getTaskTitle(task)}</h5>
+                    )}
                     <div className="task-meta">
-                      <small>By: {task.createdBy}</small>
+                      <small>By: {getTaskCreatedBy(task)}</small>
                       <br />
-                      <small>For: {task.assignedTo}</small>
+                      <small>For: {getTaskAssignedTo(task)}</small>
                     </div>
+                    {(task.tags || []).length > 0 && (
+                      <div className="task-tags">
+                        {(task.tags || []).map(tag => (
+                          <span key={tag} className="tag-pill">{tag}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -677,6 +967,55 @@ return (
                   <span className="summary-label">Completion Rate</span>
                   <span className="summary-value">{stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}%</span>
                 </div>
+              </div>
+            </div>
+
+            {/* Upcoming Deadlines and Priority Alerts */}
+            <div className="report-card">
+              <h3>Upcoming Deadlines</h3>
+              <div className="deadline-section">
+                <div className="deadline-group">
+                  <h4>Due Today</h4>
+                  {tasksDueToday.length > 0 ? (
+                    tasksDueToday.map(task => (
+                      <div key={task._id} className="deadline-item">
+                        <span>{getTaskTitle(task)}</span>
+                        <span className="deadline-date">{new Date(task.dueDate).toLocaleDateString()}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p>No tasks due today</p>
+                  )}
+                </div>
+
+                <div className="deadline-group">
+                  <h4>Due Tomorrow</h4>
+                  {tasksDueTomorrow.length > 0 ? (
+                    tasksDueTomorrow.map(task => (
+                      <div key={task._id} className="deadline-item">
+                        <span>{getTaskTitle(task)}</span>
+                        <span className="deadline-date">{new Date(task.dueDate).toLocaleDateString()}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p>No tasks due tomorrow</p>
+                  )}
+                </div>
+              </div>
+              <div className="priority-alerts">
+                <h4>Priority Alerts</h4>
+                {highPriorityAlerts.length > 0 ? (
+                  <ul>
+                    {highPriorityAlerts.slice(0, 5).map(task => (
+                      <li key={task._id}>
+                        <span>{getTaskTitle(task)}</span>
+                        <span className="alert-pill">{task.priority}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>No high priority alerts</p>
+                )}
               </div>
             </div>
 
@@ -923,9 +1262,9 @@ return (
                     ) : (
                       filteredTasksForAnalytics.map(task => (
                         <tr key={task._id}>
-                          <td>{task.title}</td>
-                          <td>{task.createdBy}</td>
-                          <td>{task.assignedTo}</td>
+                          <td>{getTaskTitle(task)}</td>
+                          <td>{getTaskCreatedBy(task)}</td>
+                          <td>{getTaskAssignedTo(task)}</td>
                           <td><span className={`status-badge status-${task.status}`}>{task.status}</span></td>
                           <td><span className={`priority-badge priority-${task.priority}`}>{task.priority}</span></td>
                         </tr>

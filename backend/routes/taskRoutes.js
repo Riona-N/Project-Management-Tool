@@ -27,7 +27,18 @@ router.get('/:id', async (req, res) => {
 // CREATE task
 router.post('/', async (req, res) => {
   try {
-    const { title, status, completed, createdBy, assignedTo, priority } = req.body;
+    const {
+      title,
+      description,
+      status,
+      completed,
+      createdBy,
+      assignedTo,
+      priority,
+      dueDate,
+      tags,
+      checklist,
+    } = req.body;
     
     if (!title) {
       return res.status(400).json({ error: 'Title is required' });
@@ -37,13 +48,20 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'CreatedBy is required' });
     }
     
-    const task = new Task({ 
-      title, 
+    const task = new Task({
+      details: {
+        title,
+        description: description || '',
+        createdBy,
+        assignedTo: assignedTo || null,
+      },
       status: status || 'todo',
       completed: completed || false,
-      createdBy,
-      assignedTo: assignedTo || null,
-      priority: priority || 'medium'
+      priority: priority || 'medium',
+      dueDate: dueDate || null,
+      tags: Array.isArray(tags) ? tags : [],
+      checklist: Array.isArray(checklist) ? checklist : [],
+      history: [{ status: status || 'todo', changedAt: new Date() }],
     });
     await task.save();
     res.status(201).json(task);
@@ -56,7 +74,26 @@ router.post('/', async (req, res) => {
 // UPDATE task
 router.put('/:id', async (req, res) => {
   try {
-    const task = await Task.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const updateData = {};
+
+    if (req.body.details && typeof req.body.details === 'object') {
+      Object.entries(req.body.details).forEach(([key, value]) => {
+        updateData[`details.${key}`] = value;
+      });
+    }
+
+    if (req.body.title) updateData['details.title'] = req.body.title;
+    if (req.body.description) updateData['details.description'] = req.body.description;
+    if (req.body.createdBy) updateData['details.createdBy'] = req.body.createdBy;
+    if (req.body.assignedTo) updateData['details.assignedTo'] = req.body.assignedTo;
+    if ('status' in req.body) updateData.status = req.body.status;
+    if ('completed' in req.body) updateData.completed = req.body.completed;
+    if ('priority' in req.body) updateData.priority = req.body.priority;
+    if ('dueDate' in req.body) updateData.dueDate = req.body.dueDate;
+    if ('tags' in req.body) updateData.tags = Array.isArray(req.body.tags) ? req.body.tags : [];
+    if ('checklist' in req.body) updateData.checklist = Array.isArray(req.body.checklist) ? req.body.checklist : [];
+
+    const task = await Task.findByIdAndUpdate(req.params.id, updateData, { new: true, runValidators: true });
     if (!task) return res.status(404).json({ error: 'Task not found' });
     res.json(task);
   } catch (err) {
@@ -70,6 +107,16 @@ router.delete('/:id', async (req, res) => {
     const task = await Task.findByIdAndDelete(req.params.id);
     if (!task) return res.status(404).json({ error: 'Task not found' });
     res.json({ message: 'Task deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE all tasks
+router.delete('/', async (req, res) => {
+  try {
+    const result = await Task.deleteMany({});
+    res.json({ message: 'All tasks deleted', deletedCount: result.deletedCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

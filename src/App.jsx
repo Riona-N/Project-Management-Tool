@@ -26,7 +26,7 @@ export default function App() {
   const [editingTaskId, setEditingTaskId] = useState(null)
   const [editingTaskTitle, setEditingTaskTitle] = useState('')
 
-  const allUsers = ['student@vitapex.ac.in', 'boss@gmail.com']
+  const allUsers = ['student@vitapex.ac.in', 'manager@gmail.com']
 
   useEffect(() => {
     const savedUser = localStorage.getItem('currentUser')
@@ -540,7 +540,7 @@ return (
           <div className="profile-info">
             <div className="profile-name">{user?.name || user?.email}</div>
             <div className="profile-role">
-              {user?.role === 'admin' ? '👔 Boss' : '👤 Employee'}
+              {user?.role === 'admin' ? '👔 Manager' : '👤 Employee'}
             </div>
           </div>
         </div>

@@ -24,7 +24,7 @@ const taskRoutes = require('./routes/taskRoutes');
 // Predefined users
 const USERS = {
   'student@vitapex.ac.in': { name: 'Student User', role: 'employee', password: 'student123' },
-  'boss@gmail.com': { name: 'Boss', role: 'admin', password: 'boss123' }
+  'manager@gmail.com': { name: 'Manager', role: 'admin', password: 'manager123' }
 };
 
 // Login endpoint
